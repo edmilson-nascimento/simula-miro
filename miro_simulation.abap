@@ -17,7 +17,9 @@ class miro_similation definition .
       end of ty_ekp,
 
 *     zlit_reci_s_ekp_tab type table of zlit_reci_s_ekp .
-      ekp_tab type table of ty_ekp.
+      ekp_tab   type table of ty_ekp,
+      rbkpv_tab type table of mrm_rbkpv,
+      rseg_tab  type table of mmcr_drseg.
 
     class-methods simulate "Simular geracao de Nota Fiscal
       importing
@@ -35,6 +37,14 @@ class miro_similation definition .
       nfenum type j_1bnfdoc-nfenum value '123456789',
       series type j_1bnfdoc-nfenum value '123'.
 
+    class-methods initialization . " Limpar variaveis de execucao
+
+*   Returna "TRUE" para erro nao encontrado
+    class-methods check_return
+      importing
+                !return      type bapiret2_tab
+      returning value(value) type char1 .
+
 *   Este metodo esta sendo feito como se fosse apenas para uma
 *   Pedido de Compras, mas sera alterado para contemplar varios
 
@@ -47,7 +57,40 @@ class miro_similation definition .
         !ekkn     type me_ekkn
         !return   type bapiret2_tab .
 
-    class-methods initialization . " Limpar variaveis de execucao
+    class-methods get_plano_contas
+      importing
+        !ekko   type ekko
+      changing
+        !ktopl  type t001-ktopl
+        !return type bapiret2_tab .
+
+    class-methods get_contab_custos
+      importing
+        !ekko   type ekko
+      changing
+        !kokrs  type tka01-kokrs
+        !return type bapiret2_tab .
+
+    class-methods get_tipo_doc_contabil
+      changing
+        !t169f  type t169f
+        !return type bapiret2_tab .
+
+    class-methods get_heard
+      importing
+        !t169f  type t169f
+        !ekko   type ekko
+        !ekpo   type me_ekpo
+      changing
+        !rbkpv  type miro_similation=>rbkpv_tab
+        !return type bapiret2_tab .
+
+    class-methods get_item
+      importing
+        !ekpo   type me_ekpo
+      changing
+        !rseg   type miro_similation=>rseg_tab
+        !return type bapiret2_tab .
 
 endclass .
 
@@ -59,7 +102,11 @@ class miro_similation  implementation .
       ekko        type ekko,
       ekpo_tab    type me_ekpo,
       ekkn_tab    type me_ekkn,
-      return_line type bapiret2.
+      return_line type bapiret2,
+      ktopl       type t001-ktopl,
+      kokrs       type tka01-kokrs,
+      t169f       type t169f,
+      rbkpv       type miro_similation=>rbkpv_tab.
 
     miro_similation=>initialization( ) .
 
@@ -84,6 +131,55 @@ class miro_similation  implementation .
           return   = return
       ) .
 
+      if ( check_return( return ) eq abap_true ) .
+
+        miro_similation=>get_plano_contas(
+          exporting
+            ekko   = ekko
+          changing
+            ktopl  = ktopl
+            return = return
+        ) .
+
+        if ( check_return( return ) eq abap_true ) .
+
+          miro_similation=>get_contab_custos(
+            exporting
+              ekko   = ekko
+            changing
+              kokrs  = kokrs
+              return = return
+          ) .
+
+          if ( check_return( return ) eq abap_true ) .
+
+            miro_similation=>get_tipo_doc_contabil(
+              changing
+                t169f  = t169f
+                return = return
+            ) .
+
+            if ( check_return( return ) eq abap_true ) .
+
+              miro_similation=>get_heard(
+                exporting
+                  t169f  = t169f
+                  ekko   = ekko
+                  ekpo   = ekpo_tab
+                changing
+                  rbkpv  = rbkpv
+                  return = return
+              ).
+
+            endif .
+
+          endif .
+
+        endif .
+
+
+      endif .
+
     endif .
 
 
@@ -95,6 +191,31 @@ class miro_similation  implementation .
 *    free:
 
   endmethod .
+
+
+  method check_return .
+
+    if ( lines( return ) eq 0 ) .
+      value = abap_true .
+    else .
+
+      read table return transporting no fields
+        with key type = 'E' .
+
+      if ( sy-subrc eq 0 ) .
+
+        value = abap_false .
+
+      else .
+
+        value = abap_true .
+
+      endif .
+
+    endif .
+
+  endmethod .
+
 
   method get_po_data .
 
@@ -136,6 +257,394 @@ class miro_similation  implementation .
       endif .
 
     endif .
+
+  endmethod .
+
+
+  method get_plano_contas .
+
+    types:
+      begin of ty_t001,
+        burks type t001-bukrs,
+        ktopl type t001-ktopl,
+      end of ty_t001 .
+
+    data:
+      t001  type t001,
+      kokrs type tka01-kokrs.
+
+    if ( ekko is not initial ) .
+
+*     Recuperando Plano de contas
+      select single bukrs ktopl
+        from t001
+        into t001
+       where bukrs eq ekko-bukrs .
+
+      if ( sy-subrc eq 0 ) .
+        ktopl = t001-ktopl .
+      else .
+*       Message
+      endif .
+
+    endif .
+
+  endmethod .
+
+
+  method get_contab_custos .
+
+    if ( ekko is not initial ) .
+
+*     Busca contabilidade de custos
+      call function 'RK_KOKRS_FIND'
+        exporting
+          bukrs                  = ekko-bukrs
+*         gsber                  = ' '
+*         test_kokrs             = ' '
+*         no_buffering           = ' '
+        importing
+          kokrs                  = kokrs
+*         t_ka01                 =
+        exceptions
+          assignment_not_allowed = 1
+          insufficient_input     = 2
+          no_kokrs_assigned      = 3
+          no_kokrs_for_bukrs     = 4
+          no_kokrs_for_bu_gb     = 5
+          wrong_kokrs_for_bukrs  = 6
+          wrong_kokrs_for_bu_gb  = 7
+          others                 = 8.
+
+      if ( sy-subrc eq 0 ) .
+      endif.
+
+    endif .
+
+  endmethod .
+
+  method get_tipo_doc_contabil .
+
+    data:
+      tcode type t169f-tcode value 'MIRO' .
+
+    call function 'MM_T169F_READ'
+      exporting
+        i_tcode                  = tcode
+      importing
+        e_t169f                  = t169f
+      exceptions
+        invalid_transaction_code = 1
+        others                   = 2.
+
+    if ( sy-subrc eq 0 ) .
+    endif.
+
+  endmethod .
+
+  method get_heard .
+
+    data:
+      line  type mrm_rbkpv,
+      tcode type mrm_rbkpv-tcode value 'MIRO'.
+
+    line-wwert    = sy-datum.       "Data para conversão de moeada estrangeira
+    line-cpudt    = sy-datum.       "data do dia
+    line-bldat    = sy-datum.       "Data da entrada
+    line-repdat   = sy-datum.       "data da revisão de fatura
+    line-gjahr    = sy-datum(4).    "Ano do lançamento
+    line-usnam    = sy-uname.       "Usuário para perfil de acesso
+    line-erfnam   = sy-uname.       "Usuário para perfil de acesso
+    line-mandt    = sy-mandt.       "mandante
+    line-saprl    = sy-saprl.       "Release SAP
+    line-cputm    = sy-uzeit.       "hora da entrada
+    line-reptim   = sy-uzeit.       "hora da revisão de fatura
+
+    line-blart    = t169f-blart.    "tipo de eocumento contábil
+
+    line-tcode    = tcode .         "Transação - MIRO para evitar problemas nas validações
+
+    line-vgart    = 'RD'.           "Tipo de operação em AG08 (tp.interno de documento)
+    line-xrechl   = 'S'.            "Lógica de lançamento para itens remessa (fatura/nota créd.)
+    line-xrechr   = 'H'.            "Lógica de lançamento para itens devolução (fat./nota cré
+    line-xrech    = 'X'.            "Código: registrar fatura
+    line-xmwst    = 'X'.            "Calcular imposto automaticamente?
+    line-xzuordli = 'X'.            "Código: atribuição itens de remessa
+    line-xzuordrt = 'X'.            "Código: atribuição de devoluções
+    line-xware    = 'X'.            "Código: fatura de mercadorias/serviço
+    line-xbest    = 'X'.            "Campo de seleção: atribuições
+    line-xkorrekt = 'X'.            "Código que indica se a fatura está correta
+    line-ivtyp    = 'B'.            "Lançamento por BAPI
+
+*   IVA Cabeçalho
+    line-xrbtx    = abap_true .     "Códigos a ser preenchido caso os itens tenham IVA´s diferenras
+*   line-mwskz1   = eg_ydrseg-mwskz."IVA do cabeçalho
+
+*   Dados do pedido
+    line-kursf    = ekko-wkurs.     "Taxa de cambio
+    line-txkrs    = ekko-wkurs.     "Taxa de cambio
+    line-lifnr    = ekko-lifnr.     "Fornecedor
+    line-bukrs    = ekko-bukrs.     "Empresa
+    line-waers    = ekko-waers.     "Moeda do documento
+
+*   Condição de pagamento
+    line-zterm    = ekko-zterm.     "Condição de pagamento
+
+    call function 'FI_TERMS_OF_PAYMENT_PROPOSE'
+      exporting
+        i_bldat         = sy-datum
+        i_budat         = sy-datum
+*       i_cpudt         = sy-datum
+        i_zfbdt         = sy-datum
+        i_zterm         = ekko-zterm
+*       i_reindat       =
+*       i_lifnr         =
+*       i_bukrs         =
+      importing
+        e_zbd1t         = line-zbd1t
+        e_zbd1p         = line-zbd1p
+        e_zbd2t         = line-zbd2t
+        e_zbd2p         = line-zbd2p
+        e_zbd3t         = line-zbd3t
+        e_zfbdt         = line-zfbdt
+*       e_split         =
+*       e_zschf         =
+        e_zlsch         = line-zlsch
+*       e_t052          =
+      exceptions
+        terms_not_found = 1
+        others          = 2.
+
+    if ( sy-subrc eq 0 ) .
+    endif.
+
+*   Sistema Lógico
+    call function 'OWN_LOGICAL_SYSTEM_GET'
+      importing
+        own_logical_system             = line-logsys
+      exceptions
+        own_logical_system_not_defined = 1
+        others                         = 2.
+    if ( sy-subrc eq 0 ) .
+    endif.
+
+*   Quantidade de itens na tg_ydrseg.
+    describe table ekpo lines line-anzrpo .
+
+  endmethod .
+
+
+  method get_item .
+
+
+  LOOP AT tg_ekpo INTO eg_ekpo.
+
+    IF sy-tabix = 1.
+      "Busca Código de agrupamento de avaliação
+      CALL FUNCTION 'CO_TA_T001K_READ'
+        EXPORTING
+          t001w_bwkey = eg_ekpo-werks
+        IMPORTING
+          t001kwa     = eg_t001k
+        EXCEPTIONS
+          not_found   = 1
+          OTHERS      = 2.
+    ENDIF.
+
+    CLEAR vg_item.
+    LOOP AT it_ekp INTO eg_ekp WHERE ebeln = eg_ekpo-ebeln
+                                 AND ebelp = eg_ekpo-ebelp.
+
+      ADD 1 TO vg_item.
+
+      eg_ekp-refitm = vg_item.
+      MODIFY it_ekp FROM eg_ekp INDEX sy-tabix TRANSPORTING refitm.
+
+*    eg_ydrseg-rblgp             = '1'.             "Item de documento no documento de faturamento - Deve ser sequencial por item da rseg
+      eg_ydrseg-rblgp             = vg_item.             "Item de documento no documento de faturamento - Deve ser sequencial por item da rseg
+      eg_ydrseg-enqueue_granted   = 'X'.             "variável booleana (X=verdade,
+      eg_ydrseg-selkz             = 'X'.             "Código de seleção
+      eg_ydrseg-selkz             = 'X'.             "Código de seleção
+      eg_ydrseg-xbesw             = 'X'.             "Código de atualização em moeda do pedido
+      eg_ydrseg-selkz             = 'X'.             "Código de seleção
+      eg_ydrseg-xekbe             = 'X'.             "Código: atualizar histórico do pedido
+      eg_ydrseg-shkzg             = 'S'.             "Código débito/crédito
+
+      "Pega a quantidade atribuída ----------------------------------------
+      CLEAR eg_ekp.
+      READ TABLE it_ekp INTO eg_ekp WITH KEY ebeln = eg_ekpo-ebeln
+                                           ebelp = eg_ekpo-ebelp.
+
+      IF eg_ekp-menge > 0.
+        eg_ekpo-netwr = ( eg_ekpo-netwr / eg_ekpo-menge ) * eg_ekp-menge.
+        eg_ekpo-menge = eg_ekp-menge.
+      ENDIF.
+      "--------------------------------------------------------------------
+
+      eg_ydrseg-wenam             = sy-uname.        "Entrada de mercadorias criada por
+      eg_ydrseg-ernam             = sy-uname.        "Nome do responsável que adicionou o objeto
+
+      eg_ydrseg-eindt             = eg_rbkpv-budat.  "Data de remessa do item
+      eg_ydrseg-webud             = eg_rbkpv-budat.  "Data de lançamento entrada e mercadoria
+      eg_ydrseg-bwmod             = eg_t001k-bwmod. "Código de agrupamento de avaliação
+
+      eg_ydrseg-kokrs             = vg_kokrs.        "Área de contabilidade de custos
+      eg_ydrseg-ktopl             = vg_ktopl.        "Plano de contas
+
+      eg_ydrseg-bedat             = eg_ekko-bedat.     "Data do pedido
+      eg_ydrseg-bukrs             = eg_ekko-bukrs.     "Empresa
+      eg_ydrseg-ekgrp             = eg_ekko-ekgrp.     "Grupo de compradores
+      eg_ydrseg-inco1             = eg_ekko-inco1.     "Incoterms parte 1
+      eg_ydrseg-inco2             = eg_ekko-inco2.     "Incoterms parte 2
+      eg_ydrseg-knumvk            = eg_ekko-knumv.     "Nº condição do documento
+      eg_ydrseg-bewae             = eg_ekko-waers.     "Moeda do pedido
+      eg_ydrseg-hwaer             = eg_ekko-waers.     "Moeda interna
+      eg_ydrseg-waers             = eg_ekko-waers.     "Código da moeda
+      eg_ydrseg-bwaer             = eg_ekko-waers.     "Código da moeda
+      eg_ydrseg-hswae             = eg_ekko-waers.     "Chave de moeda interna
+      eg_ydrseg-kursf             = eg_ekko-wkurs.     "Taxa de câmbio
+      eg_ydrseg-pstyp             = eg_ekpo-pstyp.     "Categoria de item do pedido
+      eg_ydrseg-bprme             = eg_ekpo-bprme.     "Unidade do preço do pedido
+      eg_ydrseg-bpumn             = eg_ekpo-bpumn.     "Denominador para a conversão UMPP em UMP
+      eg_ydrseg-bpumz             = eg_ekpo-bpumz.     "Numerador para a conversão UMPP em UMP
+      eg_ydrseg-ebeln             = eg_ekpo-ebeln.     "Nº pedido
+      eg_ydrseg-ebelp             = eg_ekpo-ebelp.     "Nº item do documento de compra
+      eg_ydrseg-ebonf             = eg_ekpo-ebonf.     "Item não relevante para liquidação posterior
+      eg_ydrseg-inco1             = eg_ekpo-inco1.     "Incoterms parte 1
+      eg_ydrseg-inco2             = eg_ekpo-inco2.     "Incoterms parte 2
+      eg_ydrseg-knttp             = eg_ekpo-knttp.     "Categoria de classificação contábil
+      eg_ydrseg-basme             = eg_ekpo-lmein.     "Unidade de medida básica
+      eg_ydrseg-matkl             = eg_ekpo-matkl.     "Grupo de mercadorias
+      eg_ydrseg-matnr             = eg_ekpo-matnr.     "Nº do material
+      eg_ydrseg-matbf             = eg_ekpo-matnr.     "Material com base no qual se administra o estoque
+      eg_ydrseg-meins             = eg_ekpo-meins.     "Unidade de medida do pedido
+      eg_ydrseg-mtart             = eg_ekpo-mtart.     "Tipo de material
+      eg_ydrseg-mwskz             = eg_ekpo-mwskz.     "Código do IVA
+      eg_ydrseg-peinh             = eg_ekpo-peinh.     "Unidade de preço
+      eg_ydrseg-txjcd             = eg_ekpo-txjcd.     "Domicílio fiscal
+      eg_ydrseg-txz01             = eg_ekpo-txz01.     "Texto breve
+      eg_ydrseg-umren             = eg_ekpo-umren.     "Denominador para a conversão em unidades de medida básicas
+      eg_ydrseg-umrez             = eg_ekpo-umrez.     "Contador para a conversão em UMs básicas
+      eg_ydrseg-webre             = eg_ekpo-webre.     "Código p/revisão de faturas baseado na entrada mercadorias
+      eg_ydrseg-wepos             = eg_ekpo-wepos.     "Código de entrada de mercadorias
+      eg_ydrseg-werks             = eg_ekpo-werks.     "Centro
+      eg_ydrseg-bwkey             = eg_ekpo-werks.     "Área de avaliação
+
+*Bloco valores e quantidades, este bloco deve ser montado conforme valores do XML e não do pedido
+*Eventuais diferenças devem ter limites de tolerância no standard.
+*Neste caso devem ser verificado também se os impostos estão incluidos no preço (Tabela J_1BKON1)
+
+**Inicio
+      eg_ydrseg-netpr      = eg_ekpo-netpr.     "Preço líquido
+
+      eg_ydrseg-wewrt      = eg_ekpo-effwr.     "Valor da entrada de mercadorias em moeda interna
+      eg_ydrseg-wewwr      = eg_ekpo-effwr.     "Valor de entrada de mercadorias em moeda estrangeira
+      eg_ydrseg-wewrb      = eg_ekpo-effwr.     "Valor da entrada de mercadorias em moeda do pedido
+
+      eg_ydrseg-wrbtr      = eg_ekpo-netwr.     "Montante em moeda do documento
+      eg_ydrseg-wrbtralt   = eg_ekpo-netwr.     "Montante em moeda do documento
+      eg_ydrseg-netwr      = eg_ekpo-netwr.     "Valor líquido do pedido em moeda do documento
+      eg_ydrseg-wrbtr      = eg_ekpo-netwr.     "Montante em moeda do documento
+
+      eg_ydrseg-menge      = eg_ekpo-menge.     "Quantidade
+      eg_ydrseg-mengealt   = eg_ekpo-menge.     "Quantidade
+      eg_ydrseg-bpmngalt   = eg_ekpo-menge.     "Quantidade na unidade do preço do pedido
+      eg_ydrseg-bpmng      = eg_ekpo-menge.     "Quantidade na unidade do preço do pedido
+      eg_ydrseg-bpmng      = eg_ekpo-menge.     "Quantidade na unidade do preço do pedido
+      eg_ydrseg-bsmng_f    = eg_ekpo-menge.     "Parte da quantidade linha de classificação contábil p/item
+      eg_ydrseg-wemng_f    = eg_ekpo-menge.     "Parte da quantidade linha de classificação contábil p/item
+      eg_ydrseg-bpwem_f    = eg_ekpo-menge.     "Parte da quantidade linha de classificação contábil p/item
+      eg_ydrseg-menge      = eg_ekpo-menge.     "Quantidade
+*Dados complementares
+*      eg_rbkpv-anzrpo             = '1'.      "Quantidade de itens na tg_ydrseg.
+
+**Fim
+
+
+*     Para um teste, esse bloco nao sera executado para o meu usuario
+
+*      if ( sy-uname eq 'EDMILSON' ) or
+*         ( sy-uname eq 'OSVALDO BORG' ) .
+*      else .
+**Classificação contábil
+*      SORT tg_ekkn BY zekkn.
+*
+*      DESCRIBE TABLE tg_ekkn LINES sy-tfill.
+*
+*      IF sy-tfill > 1.
+*        "Classificação contábil múltipla
+*        LOOP AT tg_ekkn INTO eg_ekkn WHERE ebelp = eg_ekpo-ebelp.
+*
+*          eg_co-wrbtr    = eg_ydrseg-netwr * eg_ekkn-vproz / 100.
+*          eg_co-aufnr    = eg_ekkn-aufnr.
+*          eg_co-kokrs    = eg_ekkn-kokrs.
+*          eg_co-kostl    = eg_ekkn-kostl.
+*          eg_co-prctr    = eg_ekkn-prctr.
+*          eg_co-saknr    = eg_ekkn-sakto.
+*          eg_co-txjcd    = eg_ekpo-txjcd.
+*          eg_co-menge    = eg_ydrseg-menge * eg_ekkn-vproz / 100.
+*          eg_co-mwskz    = eg_ekpo-mwskz.
+*          eg_co-zekkn    = eg_ekkn-zekkn.
+*          eg_co-bukrs    = eg_ekpo-bukrs.
+*          eg_co-shkzg    = 'S'.
+*          eg_co-meins    = eg_ekpo-meins.
+*          eg_co-werks    = eg_ekpo-werks.
+*          eg_co-wemng    = eg_ydrseg-menge.
+*          eg_co-bpwem    = eg_ydrseg-menge.
+*          eg_co-selkz    = 'X'.
+*
+*          APPEND eg_co TO eg_ydrseg-co.
+*
+*        ENDLOOP.
+*
+*      ELSEIF sy-tfill > 0.
+*
+*        "Classificação contábil simples
+*        READ TABLE tg_ekkn INTO eg_ekkn WITH KEY ebeln = eg_ekpo-ebeln
+*                                                 ebelp = eg_ekpo-ebelp.
+*
+*        IF sy-subrc IS INITIAL.
+*
+*          eg_ydrseg-zekkn    = eg_ekkn-zekkn.     "Nº seqüencial da classificação contábil
+*          eg_ydrseg-kostl    = eg_ekkn-kostl.     "Centro de custo
+*          eg_ydrseg-ko_prctr = eg_ekkn-prctr.     "Centro de lucro
+*          eg_ydrseg-prctr    = eg_ekkn-prctr.     "Centro de lucro
+*          eg_ydrseg-saknr    = eg_ekkn-sakto.     "Nº conta do Razão
+*
+*        ENDIF.
+*
+*      ENDIF.
+*
+*      endif .
+
+      APPEND eg_ydrseg TO tg_ydrseg.
+
+    ENDLOOP.
+
+  ENDLOOP.
+
+*Custos complementares planejados
+*  PERFORM fill_planned_costs.
+
+*Completar dados contábeis da tg_ydrseg
+  LOOP AT tg_ydrseg.
+
+    CALL FUNCTION 'MRM_DRSEG_COMPLETE_MAT_DATA'
+      EXPORTING
+        i_drseg        = tg_ydrseg
+        i_kzspr        = ''
+        i_trtyp        = ' '
+        i_smbew_modify = ' '
+      IMPORTING
+        e_drseg        = tg_ydrseg
+      EXCEPTIONS
+        error_message  = 01.
+
+    MODIFY tg_ydrseg.
+
+  ENDLOOP.
+
+*-------------Montagem de dados - Fim
 
   endmethod .
 
